@@ -42,6 +42,10 @@ public:
     void setRemoveCaretOnSubmit(bool value);
     void setAllowEmptySubmit(bool value);
 
+    virtual bool wantsTextInput() override {
+        return true;
+    }
+
 private:
     void unsetCaret_();
     void setCaret_(int start, int end);

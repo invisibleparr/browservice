@@ -56,6 +56,16 @@ public:
     virtual void onViceContextKeyDown(uint64_t window, int key) override;
     virtual void onViceContextKeyUp(uint64_t window, int key) override;
     virtual void onViceContextLoseFocus(uint64_t window) override;
+    virtual void onViceContextTouchBegin(
+        uint64_t window, int id, int x, int y
+    ) override;
+    virtual void onViceContextTouchUpdate(
+        uint64_t window, int id, int x, int y
+    ) override;
+    virtual void onViceContextTouchEnd(
+        uint64_t window, int id, int x, int y, bool cancelled
+    ) override;
+    virtual void onViceContextTouchMode(uint64_t window, bool enabled) override;
     virtual void onViceContextNavigate(uint64_t window, int direction) override;
     virtual void onViceContextNavigateToURI(uint64_t window, string uri) override;
     virtual void onViceContextCopyToClipboard(string text) override;
@@ -76,6 +86,7 @@ public:
     virtual void onWindowViewImageChanged(uint64_t handle) override;
     virtual void onWindowTitleChanged(uint64_t handle) override;
     virtual void onWindowCursorChanged(uint64_t handle, int cursor) override;
+    virtual void onWindowTextInputModeChanged(uint64_t handle, int mode) override;
     virtual optional<pair<vector<string>, size_t>> onWindowQualitySelectorQuery(
         uint64_t handle
     ) override;

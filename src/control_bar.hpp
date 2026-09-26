@@ -69,6 +69,21 @@ public:
 
     void activateAddress();
 
+    // Enable or disable touch mode. In touch mode, the control bar is rendered
+    // twice as tall (each row of pixels duplicated) to provide larger tap
+    // targets for touch screen clients; mouse/touch coordinates are mapped
+    // accordingly so that the internal layout remains unchanged. The caller is
+    // responsible for resizing the widget viewport after enabling/disabling.
+    void setTouchMode(bool enabled);
+    bool touchMode() {
+        return touchMode_;
+    }
+
+    // Height multiplier of the rendered control bar (2 in touch mode, else 1).
+    int touchScale() {
+        return touchMode_ ? 2 : 1;
+    }
+
     // TextFieldEventHandler:
     virtual void onTextFieldSubmitted(string text) override;
 
@@ -97,9 +112,19 @@ private:
     void setBookmarkID_(optional<uint64_t> bookmarkID);
 
     // Widget:
+    virtual void render() override;
     virtual void widgetViewportUpdated_() override;
     virtual void widgetRender_() override;
     virtual vector<shared_ptr<Widget>> widgetListChildren_() override;
+    virtual void mapEventCoords_(int& x, int& y) override;
+
+    // The image slice to which the control bar contents (self and children)
+    // are rendered: an internal buffer in touch mode (which is then scaled up
+    // into the actual viewport by render()), or the viewport itself otherwise.
+    ImageSlice renderTarget_();
+
+    bool touchMode_;
+    ImageSlice barBuf_;
 
     weak_ptr<ControlBarEventHandler> eventHandler_;
 

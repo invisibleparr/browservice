@@ -38,6 +38,17 @@ public:
 
     virtual void onWindowLoseFocus(uint64_t window) = 0;
 
+    // Touch events. Each touch point is identified by id (unique among the
+    // currently active touches). cancelled=true indicates a canceled touch.
+    virtual void onWindowTouchBegin(uint64_t window, int id, int x, int y) = 0;
+    virtual void onWindowTouchUpdate(uint64_t window, int id, int x, int y) = 0;
+    virtual void onWindowTouchEnd(
+        uint64_t window, int id, int x, int y, bool cancelled
+    ) = 0;
+
+    // Reports whether the client of this window uses touch input.
+    virtual void onWindowTouchMode(uint64_t window, bool enabled) = 0;
+
     virtual void onWindowNavigate(uint64_t window, int direction) = 0;
     virtual void onWindowNavigateToURI(uint64_t window, string uri) = 0;
 
@@ -83,6 +94,10 @@ public:
     void notifyViewChanged();
 
     void setCursor(int cursorSignal);
+
+    // Sets the virtual keyboard signal for this window. The argument must be
+    // one of the ImageCompressor::KbdSignal* values.
+    void setTextInputMode(int kbdSignal);
 
     optional<pair<vector<string>, size_t>> qualitySelectorQuery();
     void qualityChanged(size_t qualityIdx);
@@ -187,6 +202,7 @@ private:
 
     set<int> mouseButtonsDown_;
     set<int> keysDown_;
+    set<int> touchesDown_;
 
     bool prePrevVisited_;
     bool preMainVisited_;

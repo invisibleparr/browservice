@@ -41,6 +41,11 @@ public:
     void URINavigation_enable(VicePluginAPI_URINavigation_Callbacks callbacks);
     int PluginNavigationControlSupportQuery_query();
 
+    void TouchInput_enable(VicePluginAPI_TouchInput_Callbacks callbacks);
+    void VirtualKeyboard_setWindowTextInputMode(
+        uint64_t window, VicePluginAPI_TextInputMode mode
+    );
+
     void start(
         VicePluginAPI_Callbacks callbacks,
         void* callbackData
@@ -126,6 +131,16 @@ public:
     virtual void onWindowManagerKeyDown(uint64_t window, int key) override;
     virtual void onWindowManagerKeyUp(uint64_t window, int key) override;
     virtual void onWindowManagerLoseFocus(uint64_t window) override;
+    virtual void onWindowManagerTouchBegin(
+        uint64_t window, int id, int x, int y
+    ) override;
+    virtual void onWindowManagerTouchUpdate(
+        uint64_t window, int id, int x, int y
+    ) override;
+    virtual void onWindowManagerTouchEnd(
+        uint64_t window, int id, int x, int y, bool cancelled
+    ) override;
+    virtual void onWindowManagerTouchMode(uint64_t window, bool enabled) override;
     virtual void onWindowManagerNavigate(
         uint64_t window, int direction
     ) override;
@@ -162,6 +177,7 @@ private:
     void* callbackData_;
 
     optional<VicePluginAPI_URINavigation_Callbacks> uriNavigationCallbacks_;
+    optional<VicePluginAPI_TouchInput_Callbacks> touchInputCallbacks_;
 
     shared_ptr<TaskQueue> taskQueue_;
     shared_ptr<HTTPServer> httpServer_;

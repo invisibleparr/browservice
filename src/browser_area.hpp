@@ -11,6 +11,11 @@ namespace browservice {
 class BrowserAreaEventHandler {
 public:
     virtual void onBrowserAreaViewDirty() = 0;
+
+    // Called when the text input mode of the currently focused text field in
+    // the browser changes. The argument is a cef_text_input_mode_t value cast
+    // to int; CEF_TEXT_INPUT_MODE_NONE means that no text field is focused.
+    virtual void onBrowserAreaTextInputModeChanged(int mode) = 0;
 };
 
 class TextLayout;
@@ -68,6 +73,10 @@ private:
     virtual void widgetKeyUpEvent_(int key) override;
     virtual void widgetGainFocusEvent_(int x, int y) override;
     virtual void widgetLoseFocusEvent_() override;
+
+    virtual void widgetTouchBeginEvent_(int x, int y, int id) override;
+    virtual void widgetTouchUpdateEvent_(int x, int y, int id) override;
+    virtual void widgetTouchEndEvent_(int x, int y, int id, bool cancelled) override;
 
     weak_ptr<BrowserAreaEventHandler> eventHandler_;
     CefRefPtr<CefBrowser> browser_;

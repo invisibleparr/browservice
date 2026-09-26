@@ -184,6 +184,48 @@ FORWARD_INPUT_EVENT(
     ()
 )
 
+void Server::onViceContextTouchBegin(uint64_t window, int id, int x, int y) {
+    REQUIRE_UI_THREAD();
+    REQUIRE(state_ != ShutdownComplete);
+
+    auto it = openWindows_.find(window);
+    REQUIRE(it != openWindows_.end());
+
+    it->second->sendTouchBeginEvent(x, y, id);
+}
+
+void Server::onViceContextTouchUpdate(uint64_t window, int id, int x, int y) {
+    REQUIRE_UI_THREAD();
+    REQUIRE(state_ != ShutdownComplete);
+
+    auto it = openWindows_.find(window);
+    REQUIRE(it != openWindows_.end());
+
+    it->second->sendTouchUpdateEvent(x, y, id);
+}
+
+void Server::onViceContextTouchEnd(
+    uint64_t window, int id, int x, int y, bool cancelled
+) {
+    REQUIRE_UI_THREAD();
+    REQUIRE(state_ != ShutdownComplete);
+
+    auto it = openWindows_.find(window);
+    REQUIRE(it != openWindows_.end());
+
+    it->second->sendTouchEndEvent(x, y, id, cancelled);
+}
+
+void Server::onViceContextTouchMode(uint64_t window, bool enabled) {
+    REQUIRE_UI_THREAD();
+    REQUIRE(state_ != ShutdownComplete);
+
+    auto it = openWindows_.find(window);
+    REQUIRE(it != openWindows_.end());
+
+    it->second->setTouchMode(enabled);
+}
+
 void Server::onViceContextNavigate(uint64_t window, int direction) {
     REQUIRE_UI_THREAD();
     REQUIRE(state_ != ShutdownComplete);
@@ -363,6 +405,14 @@ void Server::onWindowCursorChanged(uint64_t handle, int cursor) {
     REQUIRE(openWindows_.count(handle));
 
     viceCtx_->setWindowCursor(handle, cursor);
+}
+
+void Server::onWindowTextInputModeChanged(uint64_t handle, int mode) {
+    REQUIRE_UI_THREAD();
+    REQUIRE(state_ != ShutdownComplete);
+    REQUIRE(openWindows_.count(handle));
+
+    viceCtx_->setWindowTextInputMode(handle, mode);
 }
 
 optional<pair<vector<string>, size_t>> Server::onWindowQualitySelectorQuery(

@@ -47,7 +47,7 @@ void RootWidget::widgetViewportUpdated_() {
 
     ImageSlice controlBarViewport, browserAreaViewport;
     tie(controlBarViewport, browserAreaViewport) =
-        getViewport().splitY(ControlBar::Height);
+        getViewport().splitY(ControlBar::Height * controlBar_->touchScale());
 
     if(!globals->config->showControlBar) {
         browserAreaViewport = getViewport();

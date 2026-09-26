@@ -53,7 +53,9 @@ struct VicePlugin::APIFuncs {
     FOREACH_VICE_API_FUNC_ITEM(PluginNavigationControlSupportQuery_query) \
     FOREACH_VICE_API_FUNC_ITEM(WindowTitle_enable) \
     FOREACH_VICE_API_FUNC_ITEM(WindowTitle_notifyWindowTitleChanged) \
-    FOREACH_VICE_API_FUNC_ITEM(ZoomInput_enable)
+    FOREACH_VICE_API_FUNC_ITEM(ZoomInput_enable) \
+    FOREACH_VICE_API_FUNC_ITEM(TouchInput_enable) \
+    FOREACH_VICE_API_FUNC_ITEM(VirtualKeyboard_setWindowTextInputMode)
 
 #define FOREACH_VICE_API_FUNC_ITEM(name) \
     decltype(&vicePluginAPI_ ## name) name = nullptr;
@@ -280,6 +282,12 @@ shared_ptr<VicePlugin> VicePlugin::load(string filename) {
     }
     if(apiFuncs->isExtensionSupported(APIVersion, "ZoomInput")) {
         LOAD_API_FUNC(ZoomInput_enable);
+    }
+    if(apiFuncs->isExtensionSupported(APIVersion, "TouchInput")) {
+        LOAD_API_FUNC(TouchInput_enable);
+    }
+    if(apiFuncs->isExtensionSupported(APIVersion, "VirtualKeyboard")) {
+        LOAD_API_FUNC(VirtualKeyboard_setWindowTextInputMode);
     }
 
     return VicePlugin::create(
@@ -641,6 +649,42 @@ void ViceContext::start(shared_ptr<ViceContextEventHandler> eventHandler) {
         plugin_->apiFuncs_->ZoomInput_enable(ctx_, zoomInputCallbacks);
     }
 
+    if(plugin_->apiFuncs_->TouchInput_enable != nullptr) {
+        INFO_LOG("Initializing TouchInput plugin");
+        VicePluginAPI_TouchInput_Callbacks touchInputCallbacks;
+        memset(&touchInputCallbacks, 0, sizeof(VicePluginAPI_TouchInput_Callbacks));
+
+        touchInputCallbacks.touchBegin =
+            CTX_CALLBACK(void, (uint64_t window, int id, int x, int y), {
+                REQUIRE(self->openWindows_.count(window));
+                self->eventHandler_->onViceContextTouchBegin(window, id, x, y);
+            });
+
+        touchInputCallbacks.touchUpdate =
+            CTX_CALLBACK(void, (uint64_t window, int id, int x, int y), {
+                REQUIRE(self->openWindows_.count(window));
+                self->eventHandler_->onViceContextTouchUpdate(window, id, x, y);
+            });
+
+        touchInputCallbacks.touchEnd =
+            CTX_CALLBACK(void, (uint64_t window, int id, int x, int y, int cancelled), {
+                REQUIRE(self->openWindows_.count(window));
+                self->eventHandler_->onViceContextTouchEnd(
+                    window, id, x, y, (bool)cancelled
+                );
+            });
+
+        touchInputCallbacks.touchMode =
+            CTX_CALLBACK(void, (uint64_t window, int enabled), {
+                REQUIRE(self->openWindows_.count(window));
+                self->eventHandler_->onViceContextTouchMode(
+                    window, (bool)enabled
+                );
+            });
+
+        plugin_->apiFuncs_->TouchInput_enable(ctx_, touchInputCallbacks);
+    }
+
     VicePluginAPI_Callbacks callbacks;
     memset(&callbacks, 0, sizeof(VicePluginAPI_Callbacks));
 
@@ -922,6 +966,21 @@ void ViceContext::setWindowCursor(uint64_t window, int cursor) {
     }
 
     plugin_->apiFuncs_->setWindowCursor(ctx_, window, apiCursor);
+}
+
+void ViceContext::setWindowTextInputMode(uint64_t window, int mode) {
+    RUNNING_CONTEXT_FUNC_CHECKS();
+    REQUIRE(openWindows_.count(window));
+
+    if(plugin_->apiFuncs_->VirtualKeyboard_setWindowTextInputMode != nullptr) {
+        REQUIRE(
+            mode >= VICE_PLUGIN_API_TEXT_INPUT_MODE_DEFAULT &&
+            mode < VICE_PLUGIN_API_TEXT_INPUT_MODE_HUGE_UNUSED
+        );
+        plugin_->apiFuncs_->VirtualKeyboard_setWindowTextInputMode(
+            ctx_, window, (VicePluginAPI_TextInputMode)mode
+        );
+    }
 }
 
 optional<pair<vector<string>, size_t>> ViceContext::windowQualitySelectorQuery(

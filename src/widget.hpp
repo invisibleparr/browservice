@@ -39,12 +39,23 @@ public:
     void setViewport(ImageSlice viewport);
     ImageSlice getViewport();
 
-    void render();
+    virtual void render();
 
     int cursor();
 
     // Make this widget the focused widget in the widget tree
     void takeFocus();
+
+    // Return the deepest widget in this subtree that currently holds focus,
+    // or nullptr if no widget in this subtree is focused.
+    Widget* focusedLeaf();
+
+    // Return true if this widget accepts text input from the user (such as
+    // widgets based on TextField). Used to determine whether a virtual keyboard
+    // should be shown on touch clients when this widget has focus.
+    virtual bool wantsTextInput() {
+        return false;
+    }
 
     // Send input event to the widget or its descendants (focus handling
     // within the subtree is done automatically). The event is propagated to the
@@ -61,6 +72,15 @@ public:
     void sendKeyUpEvent(int key);
     void sendGainFocusEvent(int x, int y);
     void sendLoseFocusEvent();
+
+    // Touch events. Each touch point is identified by id (unique among the
+    // currently active touches). The widget that contains the position of the
+    // touchBegin event handles all subsequent update and end events for that
+    // touch point. Widgets that do not implement native touch handling
+    // (widgetTouch*Event_) receive synthesized left mouse button events.
+    void sendTouchBeginEvent(int x, int y, int id);
+    void sendTouchUpdateEvent(int x, int y, int id);
+    void sendTouchEndEvent(int x, int y, int id, bool cancelled);
 
     // WidgetParent: (forward events from possible children)
     virtual void onWidgetViewDirty() override;
@@ -121,6 +141,25 @@ protected:
     virtual void widgetGainFocusEvent_(int x, int y) {}
     virtual void widgetLoseFocusEvent_() {}
 
+    // Touch event handlers for events targeted at this widget. The default
+    // implementations synthesize left mouse button events; widgets that want to
+    // handle touch natively (such as BrowserArea) should override all of these.
+    virtual void widgetTouchBeginEvent_(int x, int y, int id) {
+        widgetMouseDownEvent_(x, y, 0);
+    }
+    virtual void widgetTouchUpdateEvent_(int x, int y, int id) {
+        widgetMouseMoveEvent_(x, y);
+    }
+    virtual void widgetTouchEndEvent_(int x, int y, int id, bool cancelled) {
+        widgetMouseUpEvent_(x, y, 0);
+    }
+
+    // Hook for transforming incoming global mouse/touch coordinates before
+    // they are routed to this widget's subtree. Used by widgets that render
+    // their contents scaled relative to their viewport (e.g. the ControlBar in
+    // touch mode). The default implementation leaves the coordinates unchanged.
+    virtual void mapEventCoords_(int& x, int& y) {}
+
 private:
     void updateFocus_(int x, int y);
     void updateMouseOver_(int x, int y);
@@ -158,6 +197,10 @@ private:
 
     set<int> mouseButtonsDown_;
     set<int> keysDown_;
+
+    // Active touch points: id -> child widget handling the touch (empty if this
+    // widget itself is the target)
+    map<int, shared_ptr<Widget>> touchesDown_;
 
     int cursor_;
     int myCursor_;

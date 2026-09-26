@@ -912,6 +912,95 @@ VICE_PLUGIN_API_FUNC_DECLSPEC void vicePluginAPI_ZoomInput_enable(
 );
 
 /***************************************************************************************************
+ *** API extension "TouchInput" ***
+ **********************************/
+
+/* Extension that allows the plugin to send raw multi-touch input events for windows to the
+ * program through additional callbacks in the VicePluginAPI_TouchInput_Callbacks structure.
+ * The programs that support touch input (such as Browservice) may interpret these events as
+ * native touch input (e.g. relaying them to a browser engine that supports it), whereas plugins
+ * used with programs that do not enable this extension should synthesize mouse events from touch
+ * input themselves.
+ *
+ * Guidelines for event interpretation:
+ *
+ *   - Each distinct simultaneous touch point is identified by an id (a non-negative integer that
+ *     is unique among the currently active touches). The same id must be used in all events
+ *     belonging to the same touch point.
+ *
+ *   - A touch point begins with a touchBegin event, is followed by zero or more touchUpdate
+ *     events and ends with exactly one touchEnd event (with cancelled = 0 for a normal release
+ *     and 1 if the touch was canceled). The program must tolerate inconsistent sequences (e.g.
+ *     touchEnd without a preceding touchBegin) by ignoring such events.
+ *
+ *   - If the client device supports touch input, the plugin should call the touchMode callback
+ *     for each window at least once before any other touch callbacks for that window (typically
+ *     when the connection to the window is established). Programs may use this to adapt their UI
+ *     (e.g. enlarge on-screen controls) for touch operation. The callback may be called again if
+ *     the capability changes; enabled = 0 means the window no longer uses touch input.
+ */
+
+struct VicePluginAPI_TouchInput_Callbacks {
+    void (*touchBegin)(void*, uint64_t window, int id, int x, int y);
+    void (*touchUpdate)(void*, uint64_t window, int id, int x, int y);
+    void (*touchEnd)(void*, uint64_t window, int id, int x, int y, int cancelled);
+    void (*touchMode)(void*, uint64_t window, int enabled);
+};
+typedef struct VicePluginAPI_TouchInput_Callbacks VicePluginAPI_TouchInput_Callbacks;
+
+/* Enables the TouchInput callbacks in given context. May only be called once for each context,
+ * after vicePluginAPI_initContext and before vicePluginAPI_start. The vice plugin uses the
+ * callbacks similarly to the callbacks given in vicePluginAPI_start.
+ */
+VICE_PLUGIN_API_FUNC_DECLSPEC void vicePluginAPI_TouchInput_enable(
+    VicePluginAPI_Context* ctx,
+    VicePluginAPI_TouchInput_Callbacks callbacks
+);
+
+/***************************************************************************************************
+ *** API extension "VirtualKeyboard" ***
+ ***************************************/
+
+/* Extension that allows the program to notify the plugin about the text input mode of the
+ * currently focused text field in each window. Plugins with clients that lack a physical
+ * keyboard (such as touch screen devices) may use this information to show or hide an on-screen
+ * keyboard for the user, and to select the appropriate key layout for the current input mode.
+ */
+
+/* Text input modes; these mirror the corresponding CEF text input modes except that NONE here
+ * means that no text field is focused (and thus any on-screen keyboard should be hidden).
+ */
+enum VicePluginAPI_TextInputMode {
+    VICE_PLUGIN_API_TEXT_INPUT_MODE_DEFAULT = 0,
+    VICE_PLUGIN_API_TEXT_INPUT_MODE_NONE = 1,
+    VICE_PLUGIN_API_TEXT_INPUT_MODE_TEXT = 2,
+    VICE_PLUGIN_API_TEXT_INPUT_MODE_TEL = 3,
+    VICE_PLUGIN_API_TEXT_INPUT_MODE_URL = 4,
+    VICE_PLUGIN_API_TEXT_INPUT_MODE_EMAIL = 5,
+    VICE_PLUGIN_API_TEXT_INPUT_MODE_NUMERIC = 6,
+    VICE_PLUGIN_API_TEXT_INPUT_MODE_DECIMAL = 7,
+    VICE_PLUGIN_API_TEXT_INPUT_MODE_SEARCH = 8,
+
+    /* Invalid value that is larger than any valid enum value, used to ensure
+     * binary compatibility when new values are added.
+     */
+    VICE_PLUGIN_API_TEXT_INPUT_MODE_HUGE_UNUSED = 1000000000
+};
+typedef enum VicePluginAPI_TextInputMode VicePluginAPI_TextInputMode;
+
+/* Notifies the plugin that the text input mode of the currently focused text field in given
+ * window has changed. May only be called for running contexts (started with vicePluginAPI_start
+ * and not yet shut down) if the program supports this extension. The plugin may ignore these
+ * notifications. If multiple changes happen between two calls, it suffices for the program to
+ * call this function only once after the last change.
+ */
+VICE_PLUGIN_API_FUNC_DECLSPEC void vicePluginAPI_VirtualKeyboard_setWindowTextInputMode(
+    VicePluginAPI_Context* ctx,
+    uint64_t window,
+    VicePluginAPI_TextInputMode mode
+);
+
+/***************************************************************************************************
  *** Deprecated API versions 1000000 and 1000001 ***
  ***************************************************/
 

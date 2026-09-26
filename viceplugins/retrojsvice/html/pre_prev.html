@@ -5,6 +5,13 @@
 window.onload = function() {
     setTimeout("window.location.href = \"%-pathPrefix-%/\"", 100);
 };
+// If this page is restored from the browser cache, the onload handler does not
+// run again, so navigate here instead of leaving a blank page visible.
+window.onpageshow = function(event) {
+    if(event && event.persisted) {
+        window.location.replace("%-pathPrefix-%/");
+    }
+};
 </script>
 </head>
 <body>

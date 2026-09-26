@@ -42,6 +42,17 @@ public:
 
     virtual void onWindowManagerLoseFocus(uint64_t window) = 0;
 
+    virtual void onWindowManagerTouchBegin(
+        uint64_t window, int id, int x, int y
+    ) = 0;
+    virtual void onWindowManagerTouchUpdate(
+        uint64_t window, int id, int x, int y
+    ) = 0;
+    virtual void onWindowManagerTouchEnd(
+        uint64_t window, int id, int x, int y, bool cancelled
+    ) = 0;
+    virtual void onWindowManagerTouchMode(uint64_t window, bool enabled) = 0;
+
     virtual void onWindowManagerNavigate(uint64_t window, int direction) = 0;
     virtual void onWindowManagerNavigateToURI(uint64_t window, string uri) = 0;
 
@@ -89,6 +100,9 @@ public:
 
     void setCursor(uint64_t window, int cursorSignal);
 
+    // The kbdSignal argument must be one of the ImageCompressor::KbdSignal* values.
+    void setTextInputMode(uint64_t window, int kbdSignal);
+
     optional<pair<vector<string>, size_t>> qualitySelectorQuery(
         uint64_t window
     );
@@ -130,6 +144,16 @@ public:
     virtual void onWindowKeyDown(uint64_t window, int key) override;
     virtual void onWindowKeyUp(uint64_t window, int key) override;
     virtual void onWindowLoseFocus(uint64_t window) override;
+    virtual void onWindowTouchBegin(
+        uint64_t window, int id, int x, int y
+    ) override;
+    virtual void onWindowTouchUpdate(
+        uint64_t window, int id, int x, int y
+    ) override;
+    virtual void onWindowTouchEnd(
+        uint64_t window, int id, int x, int y, bool cancelled
+    ) override;
+    virtual void onWindowTouchMode(uint64_t window, bool enabled) override;
     virtual void onWindowNavigate(uint64_t window, int direction) override;
     virtual void onWindowNavigateToURI(uint64_t window, string uri) override;
     virtual void onWindowUploadFile(

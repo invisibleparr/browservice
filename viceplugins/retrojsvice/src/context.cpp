@@ -337,6 +337,45 @@ int Context::PluginNavigationControlSupportQuery_query() {
     return 1;
 }
 
+void Context::TouchInput_enable(VicePluginAPI_TouchInput_Callbacks callbacks) {
+    APILock apiLock(this);
+
+    REQUIRE(state_ == Pending);
+
+    REQUIRE(!touchInputCallbacks_.has_value());
+    touchInputCallbacks_ = callbacks;
+}
+
+void Context::VirtualKeyboard_setWindowTextInputMode(
+    uint64_t window, VicePluginAPI_TextInputMode mode
+) {
+    RunningAPILock apiLock(this);
+    REQUIRE(!threadRunningPumpEvents);
+
+    int kbdSignal;
+    switch(mode) {
+        case VICE_PLUGIN_API_TEXT_INPUT_MODE_NONE:
+            kbdSignal = ImageCompressor::KbdSignalNone;
+            break;
+        case VICE_PLUGIN_API_TEXT_INPUT_MODE_NUMERIC:
+        case VICE_PLUGIN_API_TEXT_INPUT_MODE_DECIMAL:
+        case VICE_PLUGIN_API_TEXT_INPUT_MODE_TEL:
+            kbdSignal = ImageCompressor::KbdSignalNumeric;
+            break;
+        default:
+            REQUIRE(
+                mode == VICE_PLUGIN_API_TEXT_INPUT_MODE_DEFAULT ||
+                mode == VICE_PLUGIN_API_TEXT_INPUT_MODE_TEXT ||
+                mode == VICE_PLUGIN_API_TEXT_INPUT_MODE_URL ||
+                mode == VICE_PLUGIN_API_TEXT_INPUT_MODE_EMAIL ||
+                mode == VICE_PLUGIN_API_TEXT_INPUT_MODE_SEARCH
+            );
+            kbdSignal = ImageCompressor::KbdSignalText;
+    }
+
+    windowManager_->setTextInputMode(window, kbdSignal);
+}
+
 void Context::start(
     VicePluginAPI_Callbacks callbacks,
     void* callbackData
@@ -839,6 +878,63 @@ FORWARD_WINDOW_EVENT(
     onWindowManagerLoseFocus(uint64_t window),
     loseFocus, (callbackData_, window)
 )
+
+void Context::onWindowManagerTouchBegin(uint64_t window, int id, int x, int y) {
+    REQUIRE(threadRunningPumpEvents);
+    REQUIRE(state_ == Running);
+    REQUIRE(window);
+
+    if(touchInputCallbacks_) {
+        REQUIRE(touchInputCallbacks_->touchBegin != nullptr);
+        touchInputCallbacks_->touchBegin(callbackData_, window, id, x, y);
+    } else {
+        // Synthesize left mouse button events for programs that do not support
+        // the TouchInput extension.
+        REQUIRE(callbacks_.mouseDown != nullptr);
+        callbacks_.mouseDown(callbackData_, window, x, y, 0);
+    }
+}
+
+void Context::onWindowManagerTouchUpdate(uint64_t window, int id, int x, int y) {
+    REQUIRE(threadRunningPumpEvents);
+    REQUIRE(state_ == Running);
+    REQUIRE(window);
+
+    if(touchInputCallbacks_) {
+        REQUIRE(touchInputCallbacks_->touchUpdate != nullptr);
+        touchInputCallbacks_->touchUpdate(callbackData_, window, id, x, y);
+    } else {
+        REQUIRE(callbacks_.mouseMove != nullptr);
+        callbacks_.mouseMove(callbackData_, window, x, y);
+    }
+}
+
+void Context::onWindowManagerTouchEnd(
+    uint64_t window, int id, int x, int y, bool cancelled
+) {
+    REQUIRE(threadRunningPumpEvents);
+    REQUIRE(state_ == Running);
+    REQUIRE(window);
+
+    if(touchInputCallbacks_) {
+        REQUIRE(touchInputCallbacks_->touchEnd != nullptr);
+        touchInputCallbacks_->touchEnd(
+            callbackData_, window, id, x, y, (int)cancelled
+        );
+    } else {
+        REQUIRE(callbacks_.mouseUp != nullptr);
+        callbacks_.mouseUp(callbackData_, window, x, y, 0);
+    }
+}
+void Context::onWindowManagerTouchMode(uint64_t window, bool enabled) {
+    REQUIRE(threadRunningPumpEvents);
+    REQUIRE(state_ == Running);
+    REQUIRE(window);
+
+    if(touchInputCallbacks_ && touchInputCallbacks_->touchMode != nullptr) {
+        touchInputCallbacks_->touchMode(callbackData_, window, (int)enabled);
+    }
+}
 FORWARD_WINDOW_EVENT(
     onWindowManagerNavigate(uint64_t window, int direction),
     navigate, (callbackData_, window, direction)

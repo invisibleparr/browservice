@@ -311,6 +311,23 @@ void Window::setCursor(int cursorSignal) {
     });
 }
 
+void Window::setTextInputMode(int kbdSignal) {
+    REQUIRE_API_THREAD();
+    REQUIRE(!closed_);
+    REQUIRE(kbdSignal >= 0 && kbdSignal < ImageCompressor::KbdSignalCount);
+
+    if(inFileUploadMode_) {
+        kbdSignal = ImageCompressor::KbdSignalNone;
+    }
+
+    shared_ptr<Window> self = shared_from_this();
+    postTask([self, kbdSignal]() {
+        if(!self->closed_) {
+            self->imageCompressor_->setKbdSignal(mce, kbdSignal);
+        }
+    });
+}
+
 optional<pair<vector<string>, size_t>> Window::qualitySelectorQuery() {
     REQUIRE_API_THREAD();
     REQUIRE(!closed_);
@@ -590,6 +607,94 @@ bool Window::handleTokenizedEvent_(MCE,
         }
         return true;
     }
+
+    // Touch mode notification (TCH): reports whether the client of this window
+    // uses touch input.
+    if(name == "TCH" && argCount == 1) {
+        eventHandler_->onWindowTouchMode(handle_, args[0] != 0);
+        return true;
+    }
+
+    // Touch events (TDN=begin, TMO=update, TUP=end, TCA=cancel). In file
+    // upload mode, touches are interpreted as left mouse button clicks on the
+    // cancel button like their mouse event counterparts.
+    if(name == "TDN" && argCount == 3) {
+        int id = args[0];
+        int x = args[1];
+        int y = args[2];
+        if(inFileUploadMode_) {
+            if(
+                isOverUploadModeCancelButton(
+                    (size_t)x, (size_t)y, (size_t)width_, (size_t)height_
+                )
+            ) {
+                fileUploadModeButtonPressed_ = true;
+                fileUploadModeButtonDown_ = true;
+                notifyViewChanged();
+            }
+        } else {
+            if(id >= 0 && id < 16 && touchesDown_.insert(id).second) {
+                eventHandler_->onWindowTouchBegin(handle_, id, x, y);
+            }
+        }
+        return true;
+    }
+    if(name == "TMO" && argCount == 3) {
+        int id = args[0];
+        int x = args[1];
+        int y = args[2];
+        if(inFileUploadMode_) {
+            if(fileUploadModeButtonPressed_) {
+                bool over = isOverUploadModeCancelButton(
+                    (size_t)x, (size_t)y, (size_t)width_, (size_t)height_
+                );
+                if(over != fileUploadModeButtonDown_) {
+                    fileUploadModeButtonDown_ = over;
+                    notifyViewChanged();
+                }
+            }
+        } else {
+            if(touchesDown_.count(id)) {
+                eventHandler_->onWindowTouchUpdate(handle_, id, x, y);
+            }
+        }
+        return true;
+    }
+    if(name == "TUP" && argCount == 3) {
+        int id = args[0];
+        int x = args[1];
+        int y = args[2];
+        if(inFileUploadMode_) {
+            if(fileUploadModeButtonPressed_) {
+                fileUploadModeButtonPressed_ = false;
+                fileUploadModeButtonDown_ = false;
+                notifyViewChanged();
+
+                if(isOverUploadModeCancelButton(
+                    (size_t)x, (size_t)y, (size_t)width_, (size_t)height_
+                )) {
+                    selfCancelFileUpload_(mce);
+                }
+            }
+        } else {
+            if(touchesDown_.erase(id)) {
+                eventHandler_->onWindowTouchEnd(handle_, id, x, y, false);
+            }
+        }
+        return true;
+    }
+    if(name == "TCA" && argCount == 3) {
+        int id = args[0];
+        int x = args[1];
+        int y = args[2];
+        if(!inFileUploadMode_) {
+            if(touchesDown_.erase(id)) {
+                eventHandler_->onWindowTouchEnd(handle_, id, x, y, true);
+            }
+        }
+        return true;
+    }
+
     if(name == "KUP" && argCount == 1) {
         int key = -decodeKey_(eventIdx, args[0]);
         if(key < 0 && isValidKey(key)) {
@@ -788,6 +893,11 @@ void Window::handleMainPageRequest_(MCE, shared_ptr<HTTPRequest> request) {
                 int key = *keysDown_.begin();
                 keysDown_.erase(keysDown_.begin());
                 eventHandler_->onWindowKeyUp(handle_, key);
+            }
+            while(!touchesDown_.empty()) {
+                int id = *touchesDown_.begin();
+                touchesDown_.erase(touchesDown_.begin());
+                eventHandler_->onWindowTouchEnd(handle_, id, 0, 0, true);
             }
             eventHandler_->onWindowMouseLeave(handle_, 0, 0);
             eventHandler_->onWindowLoseFocus(handle_);

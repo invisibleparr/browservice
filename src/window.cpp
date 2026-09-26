@@ -7,6 +7,8 @@
 #include "timeout.hpp"
 #include "vice.hpp"
 
+#include "../vice_plugin_api.h"
+
 #include "include/cef_client.h"
 
 namespace browservice {
@@ -62,6 +64,34 @@ optional<string> extractDomainFromHTTPSURL(string url) {
         return optional<string>();
     } else {
         return domain;
+    }
+}
+
+// Map a cef_text_input_mode_t value (cast to int) to the corresponding
+// VicePluginAPI_TextInputMode value.
+int mapCefTextInputModeToViceAPIMode(int cefMode) {
+    switch(cefMode) {
+        case CEF_TEXT_INPUT_MODE_DEFAULT:
+            return VICE_PLUGIN_API_TEXT_INPUT_MODE_DEFAULT;
+        case CEF_TEXT_INPUT_MODE_NONE:
+            return VICE_PLUGIN_API_TEXT_INPUT_MODE_NONE;
+        case CEF_TEXT_INPUT_MODE_TEXT:
+            return VICE_PLUGIN_API_TEXT_INPUT_MODE_TEXT;
+        case CEF_TEXT_INPUT_MODE_TEL:
+            return VICE_PLUGIN_API_TEXT_INPUT_MODE_TEL;
+        case CEF_TEXT_INPUT_MODE_URL:
+            return VICE_PLUGIN_API_TEXT_INPUT_MODE_URL;
+        case CEF_TEXT_INPUT_MODE_EMAIL:
+            return VICE_PLUGIN_API_TEXT_INPUT_MODE_EMAIL;
+        case CEF_TEXT_INPUT_MODE_NUMERIC:
+            return VICE_PLUGIN_API_TEXT_INPUT_MODE_NUMERIC;
+        case CEF_TEXT_INPUT_MODE_DECIMAL:
+            return VICE_PLUGIN_API_TEXT_INPUT_MODE_DECIMAL;
+        case CEF_TEXT_INPUT_MODE_SEARCH:
+            return VICE_PLUGIN_API_TEXT_INPUT_MODE_SEARCH;
+        default:
+            WARNING_LOG("Unknown text input mode ", cefMode, " from CEF");
+            return VICE_PLUGIN_API_TEXT_INPUT_MODE_DEFAULT;
     }
 }
 }
@@ -713,6 +743,7 @@ void Window::navigateToURI(string uri) {
         if(frame) {
             frame->LoadURL(uri);
             rootWidget_->browserArea()->takeFocus();
+            updateTextInputMode_();
         }
     }
 }
@@ -751,6 +782,7 @@ void Window::sendMouseDownEvent(int x, int y, int button) {
     if(button >= 0 && button <= 2) {
         clampMouseCoords_(x, y);
         rootWidget_->sendMouseDownEvent(x, y, button);
+        updateTextInputMode_();
     }
 }
 
@@ -805,6 +837,7 @@ void Window::sendKeyDownEvent(int key) {
 
     if(isValidKey(key)) {
         rootWidget_->sendKeyDownEvent(key);
+        updateTextInputMode_();
     }
 }
 
@@ -822,6 +855,50 @@ void Window::sendLoseFocusEvent() {
     REQUIRE(state_ == Open);
 
     rootWidget_->sendLoseFocusEvent();
+    updateTextInputMode_();
+}
+
+void Window::sendTouchBeginEvent(int x, int y, int id) {
+    REQUIRE_UI_THREAD();
+    REQUIRE(state_ == Open);
+
+    if(id >= 0 && id < 16) {
+        clampMouseCoords_(x, y);
+        rootWidget_->sendTouchBeginEvent(x, y, id);
+        updateTextInputMode_();
+    }
+}
+
+void Window::sendTouchUpdateEvent(int x, int y, int id) {
+    REQUIRE_UI_THREAD();
+    REQUIRE(state_ == Open);
+
+    if(id >= 0 && id < 16) {
+        clampMouseCoords_(x, y);
+        rootWidget_->sendTouchUpdateEvent(x, y, id);
+    }
+}
+
+void Window::sendTouchEndEvent(int x, int y, int id, bool cancelled) {
+    REQUIRE_UI_THREAD();
+    REQUIRE(state_ == Open);
+
+    if(id >= 0 && id < 16) {
+        clampMouseCoords_(x, y);
+        rootWidget_->sendTouchEndEvent(x, y, id, cancelled);
+    }
+}
+
+void Window::setTouchMode(bool enabled) {
+    REQUIRE_UI_THREAD();
+
+    if(state_ == Open && rootWidget_->controlBar()->touchMode() != enabled) {
+        rootWidget_->controlBar()->setTouchMode(enabled);
+
+        // Reapply the viewport so that the RootWidget re-splits its area
+        // between the control bar and the browser area.
+        rootWidget_->setViewport(rootViewport_);
+    }
 }
 
 void Window::zoomIn() {
@@ -1054,6 +1131,56 @@ void Window::onBrowserAreaViewDirty() {
     }
 }
 
+void Window::onBrowserAreaTextInputModeChanged(int mode) {
+    REQUIRE_UI_THREAD();
+
+    if(state_ == Open) {
+        browserAreaTextMode_ = mapCefTextInputModeToViceAPIMode(mode);
+        updateTextInputMode_();
+    }
+}
+
+void Window::updateTextInputMode_() {
+    REQUIRE_UI_THREAD();
+    REQUIRE(eventHandler_);
+
+    Widget* focusedWidget = rootWidget_->focusedLeaf();
+
+    int mode;
+    if(focusedWidget != nullptr && focusedWidget->wantsTextInput()) {
+        // A control bar text field (e.g. the address or find field) has focus.
+        mode = VICE_PLUGIN_API_TEXT_INPUT_MODE_TEXT;
+    } else if(
+        focusedWidget != nullptr &&
+        focusedWidget == rootWidget_->browserArea().get()
+    ) {
+        // The browser area has focus; use the last mode reported by CEF.
+        mode = browserAreaTextMode_;
+    } else {
+        mode = VICE_PLUGIN_API_TEXT_INPUT_MODE_NONE;
+    }
+
+    if(mode != reportedTextInputMode_) {
+        reportedTextInputMode_ = mode;
+
+        // Defer the notification to the event handler (which calls into the
+        // plugin) until outside the ViceContext event pump, since this function
+        // may be called while handling an event coming from the plugin.
+        postTask(
+            weak_ptr<Window>(shared_from_this()),
+            &Window::notifyTextInputModeChanged_, mode
+        );
+    }
+}
+
+void Window::notifyTextInputModeChanged_(int mode) {
+    REQUIRE_UI_THREAD();
+
+    if(state_ == Open && eventHandler_) {
+        eventHandler_->onWindowTextInputModeChanged(handle_, mode);
+    }
+}
+
 void Window::onPendingDownloadCountChanged(int count) {
     REQUIRE_UI_THREAD();
     rootWidget_->controlBar()->setPendingDownloadCount(count);
@@ -1083,6 +1210,9 @@ void Window::init_(shared_ptr<WindowEventHandler> eventHandler, CefRefPtr<CefReq
     state_ = Open;
     eventHandler_ = eventHandler;
     requestContext_ = requestContext;
+
+    browserAreaTextMode_ = VICE_PLUGIN_API_TEXT_INPUT_MODE_NONE;
+    reportedTextInputMode_ = VICE_PLUGIN_API_TEXT_INPUT_MODE_NONE;
 
     showSoftNavigationButtons_ = showSoftNavigationButtons;
 

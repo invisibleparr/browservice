@@ -82,6 +82,18 @@ public:
 
     void setCursorSignal(MCE, int signal);
 
+    // Signal for whether a text field is focused in the window view and what
+    // kind of virtual keyboard input mode it requires. Propagated along with
+    // the cursor signal such that height % CursorSignalCount still gives the
+    // cursor signal: height % (CursorSignalCount * KbdSignalCount) ==
+    // cursorSignal + CursorSignalCount * kbdSignal.
+    static constexpr int KbdSignalNone = 0;
+    static constexpr int KbdSignalText = 1;
+    static constexpr int KbdSignalNumeric = 2;
+    static constexpr int KbdSignalCount = 3;
+
+    void setKbdSignal(MCE, int signal);
+
 private:
     void afterConstruct_(shared_ptr<ImageCompressor> self);
 
@@ -98,6 +110,7 @@ private:
 
     int iframeSignal_;
     int cursorSignal_;
+    int kbdSignal_;
 
     shared_ptr<PNGCompressor> pngCompressor_;
 

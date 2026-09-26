@@ -3,7 +3,24 @@
 <title>%-programName-%</title>
 <script type="text/javascript">
 window.onload = function() {
+    // iOS Chrome coalesces the rapid pre_main -> next history entries into a
+    // single entry, which makes the history.back() in next.html overshoot back
+    // to the previously visited site. Skip the navigation dance entirely on
+    // that browser and load the main page directly; the history sentinel
+    // iframes loaded by the main page still provide navigation forwarding.
+    if(navigator.userAgent.indexOf("CriOS") != -1) {
+        window.location.replace("%-pathPrefix-%/");
+        return;
+    }
     setTimeout("window.location.href = \"%-pathPrefix-%/next/\"", 0);
+};
+// If this page is restored from the browser cache (e.g. by the history.back()
+// in next.html on iOS Safari), the onload handler does not run again, so
+// navigate to the main page here instead of leaving a blank page visible.
+window.onpageshow = function(event) {
+    if(event && event.persisted) {
+        window.location.replace("%-pathPrefix-%/");
+    }
 };
 </script>
 </head>

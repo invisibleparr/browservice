@@ -107,6 +107,17 @@ public:
     virtual void onViceContextKeyUp(uint64_t window, int key) = 0;
     virtual void onViceContextLoseFocus(uint64_t window) = 0;
 
+    // Touch events (only sent if the plugin supports the TouchInput extension).
+    virtual void onViceContextTouchBegin(uint64_t window, int id, int x, int y) = 0;
+    virtual void onViceContextTouchUpdate(uint64_t window, int id, int x, int y) = 0;
+    virtual void onViceContextTouchEnd(
+        uint64_t window, int id, int x, int y, bool cancelled
+    ) = 0;
+
+    // Sent when the plugin reports that a window's client is (or no longer is)
+    // using touch input. The default implementation ignores the notification.
+    virtual void onViceContextTouchMode(uint64_t window, bool enabled) {}
+
     virtual void onViceContextNavigate(uint64_t window, int direction) = 0;
     virtual void onViceContextNavigateToURI(uint64_t window, string uri) = 0;
 
@@ -173,6 +184,11 @@ public:
     void notifyWindowTitleChanged(uint64_t window);
 
     void setWindowCursor(uint64_t window, int cursor);
+
+    // Notifies the plugin about the text input mode of the currently focused text field in
+    // given window (no-op if the plugin does not support the VirtualKeyboard extension). The
+    // mode argument must be a VicePluginAPI_TextInputMode value.
+    void setWindowTextInputMode(uint64_t window, int mode);
 
     optional<pair<vector<string>, size_t>> windowQualitySelectorQuery(
         uint64_t window

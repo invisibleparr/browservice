@@ -21,6 +21,8 @@ public:
     virtual void onWindowViewImageChanged(uint64_t handle) = 0;
     virtual void onWindowTitleChanged(uint64_t handle) = 0;
     virtual void onWindowCursorChanged(uint64_t handle, int cursor) = 0;
+    // The mode argument is a VicePluginAPI_TextInputMode value cast to int.
+    virtual void onWindowTextInputModeChanged(uint64_t handle, int mode) = 0;
     virtual optional<pair<vector<string>, size_t>> onWindowQualitySelectorQuery(
         uint64_t handle
     ) = 0;
@@ -114,6 +116,17 @@ public:
     void sendKeyUpEvent(int key);
     void sendLoseFocusEvent();
 
+    // Touch events. The functions accept all combinations of argument values
+    // (the values are sanitized).
+    void sendTouchBeginEvent(int x, int y, int id);
+    void sendTouchUpdateEvent(int x, int y, int id);
+    void sendTouchEndEvent(int x, int y, int id, bool cancelled);
+
+    // Enable or disable touch mode for this window (client uses a touch screen).
+    // In touch mode, the control bar is rendered twice as tall to provide larger
+    // tap targets.
+    void setTouchMode(bool enabled);
+
     void zoomIn();
     void zoomOut();
     void zoomReset();
@@ -136,6 +149,7 @@ public:
 
     // BrowserAreaEventHandler:
     virtual void onBrowserAreaViewDirty() override;
+    virtual void onBrowserAreaTextInputModeChanged(int mode) override;
 
     // DownloadManagerEventHandler:
     virtual void onPendingDownloadCountChanged(int count) override;
@@ -169,6 +183,15 @@ private:
 
     void clampMouseCoords_(int& x, int& y);
 
+    // Recompute the text input mode signal to report to the plugin (for virtual
+    // keyboard support) based on which widget currently has focus and the last
+    // text input mode reported by CEF for the browser area. Calls
+    // onWindowTextInputModeChanged if the effective mode changed.
+    void updateTextInputMode_();
+
+    // Called (deferred via postTask) from updateTextInputMode_.
+    void notifyTextInputModeChanged_(int mode);
+
     // May call onWindowViewImageChanged immediately.
     void signalImageChanged_();
 
@@ -196,6 +219,11 @@ private:
 
     ImageSlice rootViewport_;
     shared_ptr<RootWidget> rootWidget_;
+
+    // Text input mode (VicePluginAPI_TextInputMode value) last reported by CEF
+    // for the browser area, and the mode last reported to the event handler.
+    int browserAreaTextMode_;
+    int reportedTextInputMode_;
 
     shared_ptr<DownloadManager> downloadManager_;
 

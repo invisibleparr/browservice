@@ -129,6 +129,7 @@ ImageCompressor::ImageCompressor(CKey,
 
     iframeSignal_ = 1;
     cursorSignal_ = 1;
+    kbdSignal_ = 0;
 
     int pngThreadCount = (int)thread::hardware_concurrency();
     pngThreadCount = min(pngThreadCount, 4);
@@ -241,6 +242,16 @@ void ImageCompressor::setCursorSignal(MCE, int signal) {
     }
 }
 
+void ImageCompressor::setKbdSignal(MCE, int signal) {
+    REQUIRE_API_THREAD();
+    REQUIRE(signal >= 0 && signal < KbdSignalCount);
+
+    if(kbdSignal_ != signal) {
+        kbdSignal_ = signal;
+        updateNotify(mce);
+    }
+}
+
 void ImageCompressor::afterConstruct_(shared_ptr<ImageCompressor> self) {
     shared_ptr<TaskQueue> taskQueue = TaskQueue::getActiveQueue();
     compressorThread_ = thread([this, taskQueue]() {
@@ -295,7 +306,11 @@ tuple<vector<uint8_t>, size_t, size_t> ImageCompressor::fetchImage_(MCE) {
             while((int)(width % (size_t)IframeSignalCount) != iframeSignal_) {
                 ++width;
             }
-            while((int)(height % (size_t)CursorSignalCount) != cursorSignal_) {
+
+            int cursorKbdTarget =
+                cursorSignal_ + CursorSignalCount * kbdSignal_;
+            constexpr int CursorKbdModulus = CursorSignalCount * KbdSignalCount;
+            while((int)(height % (size_t)CursorKbdModulus) != cursorKbdTarget) {
                 ++height;
             }
 

@@ -5,6 +5,15 @@
 window.onload = function() {
     setTimeout("window.history.back(); setTimeout(\"window.location.href = \\\"%-pathPrefix-%/\\\"\", 500)", 100);
 };
+// If this page is restored from the browser cache (e.g. by the history.back()
+// above on browsers that use a back/forward cache), the onload handler does
+// not run again, so navigate to the main page here instead of leaving a blank
+// page visible.
+window.onpageshow = function(event) {
+    if(event && event.persisted) {
+        window.location.replace("%-pathPrefix-%/");
+    }
+};
 </script>
 </head>
 <body>

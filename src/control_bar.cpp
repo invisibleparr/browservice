@@ -5,6 +5,7 @@
 #include "text.hpp"
 #include "timeout.hpp"
 
+#include <string.h>
 #include <time.h>
 
 namespace browservice {
@@ -904,6 +905,8 @@ ControlBar::ControlBar(CKey,
     clipboardButtonEnabled_ = false;
     showSoftNavigationButtons_ = showSoftNavigationButtons;
 
+    touchMode_ = false;
+
     animationTimeout_ = Timeout::create(30);
 
     addrText_ = TextLayout::create();
@@ -1190,10 +1193,87 @@ void ControlBar::setBookmarkID_(optional<uint64_t> bookmarkID) {
     bookmarkToggleButton_->setIcon(bookmarkID_.has_value() ? bookmarkOnIcon : bookmarkOffIcon);
 }
 
+void ControlBar::setTouchMode(bool enabled) {
+    REQUIRE_UI_THREAD();
+
+    if(touchMode_ != enabled) {
+        touchMode_ = enabled;
+        signalViewDirty_();
+    }
+}
+
+ImageSlice ControlBar::renderTarget_() {
+    if(touchMode_) {
+        return barBuf_;
+    } else {
+        return getViewport();
+    }
+}
+
+void ControlBar::mapEventCoords_(int& x, int& y) {
+    if(touchMode_) {
+        // The rendered control bar is twice as tall in touch mode; map the
+        // incoming coordinates to the internal (unscaled) layout space.
+        y /= 2;
+    }
+}
+
+void ControlBar::render() {
+    REQUIRE_UI_THREAD();
+
+    Widget::render();
+
+    if(touchMode_ && !barBuf_.isEmpty()) {
+        ImageSlice viewport = getViewport();
+
+        // Scale up the internally rendered control bar into the (twice as
+        // tall) viewport using bilinear interpolation for a smooth result.
+        int srcH = Height;
+        int dstH = viewport.height();
+        int width = min(barBuf_.width(), viewport.width());
+        int denom = 2 * dstH;
+
+        for(int y = 0; y < dstH; ++y) {
+            // Sample position of the destination row in source coordinates,
+            // scaled by 'denom'.
+            int v = (2 * y + 1) * srcH - dstH;
+
+            if(v <= 0 || v >= (srcH - 1) * denom) {
+                // Top/bottom edge: clamp to the first/last row.
+                int yc = max(0, min(srcH - 1, v / denom));
+                memcpy(viewport.getPixelPtr(0, y), barBuf_.getPixelPtr(0, yc),
+                       4 * width);
+            } else {
+                int y0 = v / denom;
+                int w = ((v % denom) * 256 + dstH) / denom;  // blend weight 0..256
+                const uint8_t* rowA = barBuf_.getPixelPtr(0, y0);
+                const uint8_t* rowB = barBuf_.getPixelPtr(0, y0 + 1);
+                uint8_t* dst = viewport.getPixelPtr(0, y);
+
+                for(int x = 0; x < width * 4; ++x) {
+                    int a = rowA[x];
+                    int b = rowB[x];
+                    dst[x] = (uint8_t)((a * (256 - w) + b * w) >> 8);
+                }
+            }
+        }
+    }
+}
+
 void ControlBar::widgetViewportUpdated_() {
     REQUIRE_UI_THREAD();
 
-    ImageSlice viewport = getViewport();
+    ImageSlice realViewport = getViewport();
+
+    // In touch mode, the contents are rendered into an internal buffer at the
+    // original size and then scaled up into the actual viewport by render().
+    if(touchMode_) {
+        barBuf_ = ImageSlice::createImage(realViewport.width(), Height);
+    } else {
+        barBuf_ = ImageSlice();
+    }
+
+    ImageSlice viewport = renderTarget_();
     Layout layout = layout_();
 
     if(showSoftNavigationButtons_) {
@@ -1259,7 +1339,7 @@ void ControlBar::widgetRender_() {
 
     animationTimeout_->clear(false);
 
-    ImageSlice viewport = getViewport();
+    ImageSlice viewport = renderTarget_();
     Layout layout = layout_();
 
     // Frame

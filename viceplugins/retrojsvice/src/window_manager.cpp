@@ -150,6 +150,14 @@ void WindowManager::setCursor(uint64_t window, int cursorSignal) {
     it->second->setCursor(cursorSignal);
 }
 
+void WindowManager::setTextInputMode(uint64_t window, int kbdSignal) {
+    REQUIRE_API_THREAD();
+
+    auto it = windows_.find(window);
+    REQUIRE(it != windows_.end());
+    it->second->setTextInputMode(kbdSignal);
+}
+
 optional<pair<vector<string>, size_t>> WindowManager::qualitySelectorQuery(
     uint64_t window
 ) {
@@ -271,6 +279,22 @@ FORWARD_WINDOW_EVENT(
 FORWARD_WINDOW_EVENT(
     onWindowLoseFocus(uint64_t window),
     onWindowManagerLoseFocus(window)
+)
+FORWARD_WINDOW_EVENT(
+    onWindowTouchBegin(uint64_t window, int id, int x, int y),
+    onWindowManagerTouchBegin(window, id, x, y)
+)
+FORWARD_WINDOW_EVENT(
+    onWindowTouchUpdate(uint64_t window, int id, int x, int y),
+    onWindowManagerTouchUpdate(window, id, x, y)
+)
+FORWARD_WINDOW_EVENT(
+    onWindowTouchEnd(uint64_t window, int id, int x, int y, bool cancelled),
+    onWindowManagerTouchEnd(window, id, x, y, cancelled)
+)
+FORWARD_WINDOW_EVENT(
+    onWindowTouchMode(uint64_t window, bool enabled),
+    onWindowManagerTouchMode(window, enabled)
 )
 FORWARD_WINDOW_EVENT(
     onWindowNavigate(uint64_t window, int direction),

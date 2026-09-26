@@ -5,24 +5,40 @@
 <style>
 body {
     overflow: hidden;
+    touch-action: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
 }
 img {
     position: absolute;
     top: 0px;
     left: 0px;
+    touch-action: none;
+    -webkit-user-drag: none;
 }
 iframe {
     display: none;
     position: absolute;
     z-index: 1;
 }
-input {
+/* Hidden text input elements (backspace capture hack and virtual keyboard).
+   They are kept inside the viewport but underneath the image element (which
+   has a higher z-index) so that they remain invisible. Note that they must not
+   be positioned outside the viewport: mobile browsers may refuse to show the
+   on-screen keyboard for off-screen elements, or scroll/zoom the page to bring
+   them into view. The font size is kept at 16px to prevent iOS from zooming
+   the page when the element gains focus. */
+textarea, input {
     position: absolute;
     z-index: 1;
-    left: -50px;
-    top: -50px;
-    width: 40px;
-    height: 40px;
+    left: 0px;
+    top: 0px;
+    width: 2px;
+    height: 2px;
+    padding: 0px;
+    border-width: 0px;
+    font-size: 16px;
+    -webkit-user-select: text;
 }
 .handCursor {
     cursor: pointer;
@@ -50,6 +66,7 @@ var fixMousePosition = false;
 var leftMouseButtonIs1 = false;
 var bodyOverflowHiddenNotSupported = false;
 var useBackspaceCaptureHack = false;
+var isTouchDevice = false;
 
 function detectBrowserQuirks() {
     var ua = window.navigator.userAgent.toLowerCase();
@@ -79,6 +96,44 @@ function detectBrowserQuirks() {
             useBackspaceCaptureHack = true;
         }
     }
+
+    // Touch input and virtual keyboard support is only enabled on devices with
+    // touch capability. This keeps the behavior of old non-touch client
+    // browsers completely unchanged.
+    isTouchDevice =
+        ('ontouchstart' in window) || ((navigator.maxTouchPoints | 0) > 0);
+
+    // Some iOS app browsers (UIWebView-based shells, e.g. on old iPod touches)
+    // report a mobile UA but expose no touch events at all, only synthetic
+    // mouse events. Treat them as touch devices too so that they get the
+    // virtual keyboard and the touch-mode control bar; their input keeps
+    // flowing through the regular mouse event path (the touch-event-based
+    // suppression of synthetic mouse events never triggers for them).
+    if(
+        !isTouchDevice &&
+        (ua.indexOf("iphone") != -1 || ua.indexOf("ipad") != -1 ||
+         ua.indexOf("ipod") != -1)
+    ) {
+        isTouchDevice = true;
+    }
+
+    // Old iOS WebKit (< 600, e.g. iOS 4 era) never shows the on-screen
+    // keyboard for programmatic focus(), not even from within a user gesture
+    // handler; the keyboard only appears when a tap lands directly on an
+    // editable element. Such clients need the tap overlay (see
+    // kbOverlayMode_). Modern iOS Safari and Android browsers do not, and
+    // the overlay would interfere with normal touch input there. Note that
+    // Android Chrome also reports an old AppleWebKit version, but its UA
+    // does not contain "Mac OS X".
+    if(isTouchDevice) {
+        var webkitMatch = navigator.userAgent.match(/AppleWebKit\/([0-9]+)/);
+        kbNeedsTapOverlay = (
+            webkitMatch != null &&
+            ua.indexOf("mac os x") != -1 &&
+            parseInt(webkitMatch[1], 10) < 600
+        );
+    }
+
 }
 
 // State variables
@@ -90,6 +145,37 @@ var eventQueueStartIdx = 0;
 var mouseMoved = false;
 var mouseX = 0;
 var mouseY = 0;
+
+// Touch input and virtual keyboard state (only used on touch devices)
+
+// Set for old iOS WebKit builds that need a direct tap on an editable element
+// to show the on-screen keyboard (see detectBrowserQuirks, kbOverlayMode_).
+var kbNeedsTapOverlay = false;
+var pendingTouchMoves = {};
+var kbdTextarea = null;
+var kbdInput = null;
+var kbdState = 0; // 0=none, 1=text, 2=numeric (derived from image height signal)
+var lastKbValue = "";
+
+// Debounced application of the keyboard signal state.
+var kbdStatePending = 0;
+var kbdStateDebounceTimeout = null;
+
+function applyKbdState() {
+    kbdStateDebounceTimeout = null;
+    if(kbdState == kbdStatePending) return;
+    kbdState = kbdStatePending;
+    updateKeyboardFocus();
+}
+
+// Timestamp of the most recent touch event. Used to suppress the synthetic
+// mouse events that browsers generate for touches (which would otherwise be
+// sent as duplicate input).
+var lastTouchTime = 0;
+
+function recentTouchEvent() {
+    return isTouchDevice && new Date().getTime() - lastTouchTime < 1000;
+}
 
 // Iframe loading system
 var nextAllowedIframeLoadTime = new Date().getTime();
@@ -188,6 +274,16 @@ function sendImgReq(imgLoadIdx) {
         mouseMoved = false;
     }
 
+    for(var touchId in pendingTouchMoves) {
+        if(pendingTouchMoves.hasOwnProperty(touchId)) {
+            eventQueue[eventQueue.length] =
+                "TMO_" + touchId + "_" +
+                pendingTouchMoves[touchId][0] + "_" +
+                pendingTouchMoves[touchId][1];
+        }
+    }
+    pendingTouchMoves = {};
+
     var width = document.body.clientWidth | 0;
     var height = document.body.clientHeight | 0;
     if(width == 0 || height == 0) {
@@ -261,6 +357,20 @@ function updateCursor(imgElemIdx) {
         imgElemClass[imgElemIdx] = newClassName;
         imgElems[imgElemIdx].className = newClassName;
     }
+
+    // The virtual keyboard input mode signal is encoded in the image height as
+    // floor((height % 9) / 3). Changes are debounced briefly to avoid flickering
+    // the on-screen keyboard when the remote focus state changes rapidly.
+    if(isTouchDevice) {
+        var newKbdState = Math.floor((imgElems[imgElemIdx].height % 9) / 3);
+        if(newKbdState != kbdStatePending) {
+            kbdStatePending = newKbdState;
+            if(kbdStateDebounceTimeout != null) {
+                clearTimeout(kbdStateDebounceTimeout);
+            }
+            kbdStateDebounceTimeout = setTimeout(applyKbdState, 250);
+        }
+    }
 }
 
 function postImgLoadHandler(imgLoadIdx) {
@@ -310,6 +420,424 @@ function imgLoadHandler(imgElemIdx) {
     setTimeout("postImgLoadHandler(" + currentImgLoadIdx + ")", 0);
 
     startImgLoad();
+}
+
+// Virtual keyboard support for touch devices. A hidden textarea/input element
+// is focused when a text field gains focus in the remote browser, causing the
+// client device to show its on-screen keyboard. Key presses are forwarded as
+// regular key events; character input (including autocorrect and composition)
+// is detected by diffing the value of the element on input events.
+
+function kbActiveElement() {
+    return kbdState == 2 ? kbdInput : kbdTextarea;
+}
+
+function keyboardHasFocus() {
+    if(!isTouchDevice) return false;
+    var ae = document.activeElement;
+    return ae === kbdTextarea || ae === kbdInput;
+}
+
+// Filler content seeded into the keyboard buffer while a remote text field is
+// focused. Some mobile browsers (e.g. Android Chrome with Gboard) report no
+// usable key information for backspace presses (keyCode 229 / key 'Unidentified')
+// and fire no input event when the local buffer is empty, so an empty buffer
+// gives no signal that a deletion was requested. By seeding invisible-to-the-
+// user filler characters, every backspace press deletes something locally,
+// which produces an input event whose diff results in exactly one remote
+// backspace. The filler itself is never sent to the server (it is part of the
+// baseline value).
+var kbFiller = new Array(513).join(" ");
+
+// Set to true once a keydown event is observed that carries no usable key
+// information (keyCode 229 / key 'Unidentified', as reported by Android soft
+// keyboards for every key press). Only then is the deletion filler used; on
+// browsers with proper key codes (e.g. iOS) the buffer stays empty and
+// backspaces are detected directly from the keydown event instead, which
+// avoids interfering with those browsers' text input behavior.
+var kbUnreliableKeydown = false;
+
+function resetKeyboardBuffer() {
+    var baseline = kbUnreliableKeydown ? kbFiller : "";
+    lastKbValue = baseline;
+    try {
+        kbdTextarea.value = baseline;
+        kbdInput.value = baseline;
+    } catch(e) {}
+    // Place the caret at the end so that typing appends after the filler and
+    // backspace deletes from it.
+    var elems = [kbdTextarea, kbdInput];
+    for(var i = 0; i < elems.length; ++i) {
+        try {
+            elems[i].selectionStart = kbFiller.length;
+            elems[i].selectionEnd = kbFiller.length;
+        } catch(e) {}
+    }
+}
+
+// True after focusKeyboard_() has focused the element outside a user gesture;
+// such a focus attempt may have been ignored by the browser for the purpose of
+// showing the on-screen keyboard, so allow one blur/focus cycle from within the
+// next gesture handler to recover. Cleared once a gesture-based focus is done.
+var kbAsyncFocusPending = false;
+
+function focusKeyboard_() {
+    // Note that some mobile browsers ignore programmatic focus() calls outside
+    // user gesture handlers; this function is therefore also called from the
+    // touchstart handler so that the keyboard can be brought back by tapping.
+    var elem = kbActiveElement();
+    if(elem != null && document.activeElement !== elem) {
+        try {
+            elem.focus();
+            // Some browsers select all content on focus, which would make the
+            // next typed character replace the filler (sending a flood of
+            // deletions). Keep the caret at the end instead.
+            try {
+                elem.selectionStart = elem.value.length;
+                elem.selectionEnd = elem.value.length;
+            } catch(e) {}
+            kbAsyncFocusPending = true;
+            // Undo any page scrolling that focusing the off-screen element may
+            // have triggered (some mobile browsers do this despite overflow
+            // hidden).
+            window.scrollTo(0, 0);
+        } catch(e) {}
+    }
+}
+
+// Some shells (e.g. UIWebView-based app browsers on old iOS) only show the
+// soft keyboard when a tap lands directly on an editable element, and never
+// for programmatic focus(). While a remote field has focus, stretch the active
+// keyboard element transparently over the whole viewport so that the next tap
+// physically hits it (bringing up the keyboard natively). Mouse events still
+// bubble to our document-level handlers with correct coordinates, so input
+// keeps flowing to the remote page.
+function kbOverlayMode_(active) {
+    if(!kbNeedsTapOverlay) return;
+
+    var elem = kbActiveElement();
+    var other = (elem === kbdTextarea) ? kbdInput : kbdTextarea;
+
+    try { if(other != null) other.style.cssText = ""; } catch(e) {}
+    if(elem == null) return;
+
+    if(active && kbdState != 0) {
+        elem.style.cssText =
+            "position:absolute;top:0;left:0;width:100%;height:100%;" +
+            "z-index:40;margin:0;padding:0;border-width:0;" +
+            "background:transparent;color:transparent;font-size:16px;";
+    } else {
+        elem.style.cssText = "";
+    }
+}
+
+function updateKeyboardFocus() {
+    if(!isTouchDevice || kbdTextarea == null) return;
+
+    resetKeyboardBuffer();
+
+    if(kbdState == 0) {
+        kbAsyncFocusPending = false;
+        var ae = document.activeElement;
+        if(ae === kbdTextarea || ae === kbdInput) {
+            try { ae.blur(); } catch(e) {}
+        }
+    } else {
+        focusKeyboard_();
+    }
+
+    kbOverlayMode_(kbdState != 0);
+}
+
+function kbKeydownHandler(event) {
+    if(!event) event = window.event;
+    var key = event.keyCode | 0;
+
+    var keyName = event.key != null ? event.key : "?";
+
+    if(
+        !kbUnreliableKeydown &&
+        (key == 0 || key == 229 || keyName == "Unidentified")
+    ) {
+        // This browser does not report usable keys: switch to the filler
+        // scheme. Append the filler while preserving any content typed so far
+        // and extend the baseline accordingly, so nothing is sent to the
+        // server by this change.
+        kbUnreliableKeydown = true;
+        try {
+            kbdTextarea.value += kbFiller;
+            kbdInput.value += kbFiller;
+            lastKbValue += kbFiller;
+        } catch(e) {}
+    }
+
+    // Refill the deletion filler before the key takes effect (the input event
+    // handler may not run for deletions of trailing whitespace). Appending now
+    // means a backspace simply deletes one of the new filler characters, which
+    // then produces a regular diff.
+    if(
+        kbUnreliableKeydown &&
+        event.target != null &&
+        typeof event.target.value === "string" &&
+        event.target.value.length < 16
+    ) {
+        try {
+            event.target.value += kbFiller;
+            lastKbValue += kbFiller;
+            event.target.selectionStart = event.target.value.length;
+            event.target.selectionEnd = event.target.value.length;
+        } catch(e) {}
+    }
+    // Special keys are sent directly. Character input and deletions (including
+    // autocorrect updates) arrive via the input event instead.
+    if(key == 9 || key == 13 || key == 27 || (key >= 35 && key <= 40)) {
+        putEvent("KDN_" + encodeKey(key));
+        putEvent("KUP_" + encodeKey(key));
+        preventDefault(event);
+    } else if(
+        (key == 8 || keyName == "Backspace") &&
+        event.target != null &&
+        event.target.value === ""
+    ) {
+        // Backspace with an empty local buffer: there is nothing to delete
+        // locally and no input event will fire, but the remote text field may
+        // still have content (which we cannot read), so send a backspace.
+        putEvent("KDN_" + encodeKey(8));
+        putEvent("KUP_" + encodeKey(8));
+    }
+}
+
+function kbInputHandler(elem, event) {
+    // Ignore intermediate composition updates; the final result is handled on
+    // the compositionend event.
+    if(event && event.isComposing) return;
+
+    var newVal = elem.value;
+    var oldVal = lastKbValue;
+
+    // Compute the common prefix and suffix of the old and new values to detect
+    // deletions and insertions around the caret. Deletions are sent as
+    // backspaces and insertions as key presses, which mirrors how the edits
+    // happened relative to the caret in the remote text field.
+    var p = 0;
+    while(
+        p < oldVal.length && p < newVal.length &&
+        oldVal.charAt(p) == newVal.charAt(p)
+    ) ++p;
+
+    var s = 0;
+    while(
+        s < oldVal.length - p && s < newVal.length - p &&
+        oldVal.charAt(oldVal.length - 1 - s) == newVal.charAt(newVal.length - 1 - s)
+    ) ++s;
+
+    for(var i = 0; i < oldVal.length - p - s; ++i) {
+        putEvent("KDN_" + encodeKey(8));
+        putEvent("KUP_" + encodeKey(8));
+    }
+
+    var end = newVal.length - s;
+    var j = p;
+    while(j < end) {
+        var code = newVal.charCodeAt(j);
+        if(
+            code >= 0xD800 && code <= 0xDBFF && j + 1 < end &&
+            newVal.charCodeAt(j + 1) >= 0xDC00 && newVal.charCodeAt(j + 1) <= 0xDFFF
+        ) {
+            putEvent("KPR_" + encodeKey(
+                0x10000 + (code - 0xD800) * 0x400 + (newVal.charCodeAt(j + 1) - 0xDC00)
+            ));
+            j += 2;
+        } else {
+            putEvent("KPR_" + encodeKey(code));
+            ++j;
+        }
+    }
+
+    lastKbValue = newVal;
+
+    // Keep the deletion filler from running dry (each backspace consumes one
+    // filler character). The appended filler becomes part of the baseline, so
+    // it is never sent to the server.
+    if(kbUnreliableKeydown && elem.value.length < 16) {
+        try {
+            elem.value += kbFiller;
+        } catch(e) {}
+        lastKbValue = elem.value;
+    }
+}
+
+function registerKeyboardHandlers() {
+    kbdTextarea = document.getElementById("kbTextarea");
+    kbdInput = document.getElementById("kbInput");
+    if(kbdTextarea == null || kbdInput == null) return;
+
+    // Use a dedicated input element for numeric fields so that mobile browsers
+    // show the appropriate key layout. The decimal input mode is used as it is
+    // a superset of the plain numeric layout (allowing also e.g. the minus
+    // sign and decimal separator).
+    try {
+        kbdInput.setAttribute("inputmode", "decimal");
+    } catch(e) {}
+
+    var elems = [kbdTextarea, kbdInput];
+    for(var i = 0; i < elems.length; ++i) {
+        (function(elem) {
+            elem.onkeydown = kbKeydownHandler;
+            elem.addEventListener(
+                "input",
+                function(event) { kbInputHandler(elem, event); },
+                false
+            );
+            elem.addEventListener(
+                "compositionend",
+                function() { kbInputHandler(elem, null); },
+                false
+            );
+        })(elems[i]);
+    }
+}
+
+// iOS Safari uses arbitrary large integers as touch identifiers, while the
+// server protocol requires identifiers in the range 0..15. Map each active
+// client-side identifier to a free slot for the duration of its touch.
+var touchIdSlots = {};
+var touchSlotUsed = new Array(16);
+for(var i = 0; i < 16; ++i) { touchSlotUsed[i] = false; }
+
+function mapTouchId(rawId) {
+    var key = "" + rawId;
+    if(touchIdSlots.hasOwnProperty(key)) { return touchIdSlots[key]; }
+    for(var slot = 0; slot < 16; ++slot) {
+        if(!touchSlotUsed[slot]) {
+            touchSlotUsed[slot] = true;
+            touchIdSlots[key] = slot;
+            return slot;
+        }
+    }
+    return 0;
+}
+
+function releaseTouchId(rawId) {
+    var key = "" + rawId;
+    if(touchIdSlots.hasOwnProperty(key)) {
+        touchSlotUsed[touchIdSlots[key]] = false;
+        delete touchIdSlots[key];
+    }
+}
+
+// Touch input support for touch devices. Touch events are sent to the server
+// as raw touch events (TDN/TMO/TUP/TCA tokens) which the remote browser engine
+// interprets natively (including gesture recognition such as tap-to-click and
+// swipe scrolling). The default behavior of the client page itself (scrolling,
+// zooming, synthetic mouse events) is suppressed.
+
+// Attempts to (re-)open the on-screen keyboard by focusing our hidden element.
+// Must be called synchronously from a user gesture handler, since mobile
+// browsers may ignore focus() calls made outside a gesture even though the
+// element becomes focused; in that case a plain focus() call would also be a
+// no-op later on (the element already has focus), so force a blur/focus cycle
+// to make sure the browser sees a fresh focus event. To avoid flickering an
+// already visible keyboard, the cycle is only done when the element does not
+// have focus or when the last focus attempt was made outside a gesture (and
+// may thus have been ignored for keyboard purposes).
+function refocusKeyboardInGesture_() {
+    if(kbdState == 0) return;
+
+    var kbElem = kbActiveElement();
+    if(kbElem == null) return;
+
+    if(document.activeElement === kbElem && !kbAsyncFocusPending) {
+        // Assume the keyboard is already visible.
+        return;
+    }
+
+    try { kbElem.blur(); } catch(e) {}
+    try {
+        kbElem.focus();
+        try {
+            kbElem.selectionStart = kbElem.value.length;
+            kbElem.selectionEnd = kbElem.value.length;
+        } catch(e2) {}
+        window.scrollTo(0, 0);
+    } catch(e) {}
+    kbAsyncFocusPending = false;
+}
+
+function registerTouchHandlers() {
+    var options = {passive: false};
+
+    // Note that touchstart and touchend must not be canceled with
+    // preventDefault(): doing so suppresses the user activation needed for
+    // showing the on-screen keyboard (and prevents click events entirely on
+    // iOS, where focus() only works from a click handler). The default page
+    // scrolling/zooming behavior is instead suppressed with touch-action: none
+    // in CSS, and the synthetic mouse events generated for touches are ignored
+    // via the recentTouchEvent() check in the mouse event handlers.
+    document.addEventListener("touchstart", function(event) {
+        lastTouchTime = new Date().getTime();
+
+        // Some mobile browsers honor focus() from touchstart (earlier than
+        // from the click handler). Note that this must not preventDefault().
+        refocusKeyboardInGesture_();
+
+        var touches = event.changedTouches;
+        for(var i = 0; i < touches.length; ++i) {
+            putEvent(
+                "TDN_" + mapTouchId(touches[i].identifier) + "_" +
+                (touches[i].clientX | 0) + "_" + (touches[i].clientY | 0)
+            );
+        }
+    }, options);
+
+    document.addEventListener("touchmove", function(event) {
+        lastTouchTime = new Date().getTime();
+        preventDefault(event);
+
+        var touches = event.changedTouches;
+        for(var i = 0; i < touches.length; ++i) {
+            pendingTouchMoves[mapTouchId(touches[i].identifier)] = [
+                touches[i].clientX | 0, touches[i].clientY | 0
+            ];
+        }
+        newEventNotify();
+    }, options);
+
+    document.addEventListener("touchend", function(event) {
+        lastTouchTime = new Date().getTime();
+
+        var touches = event.changedTouches;
+        for(var i = 0; i < touches.length; ++i) {
+            var id = mapTouchId(touches[i].identifier);
+            delete pendingTouchMoves[id];
+            releaseTouchId(touches[i].identifier);
+            putEvent(
+                "TUP_" + id + "_" +
+                (touches[i].clientX | 0) + "_" + (touches[i].clientY | 0)
+            );
+        }
+    }, options);
+
+    document.addEventListener("touchcancel", function(event) {
+        lastTouchTime = new Date().getTime();
+
+        var touches = event.changedTouches;
+        for(var i = 0; i < touches.length; ++i) {
+            var id = mapTouchId(touches[i].identifier);
+            delete pendingTouchMoves[id];
+            releaseTouchId(touches[i].identifier);
+            putEvent(
+                "TCA_" + id + "_" +
+                (touches[i].clientX | 0) + "_" + (touches[i].clientY | 0)
+            );
+        }
+    }, options);
+
+    // iOS only allows showing the on-screen keyboard from a click event
+    // handler, so also attempt to focus our hidden element there.
+    document.addEventListener("click", function(event) {
+        refocusKeyboardInGesture_();
+    }, false);
 }
 
 // Event handling
@@ -394,6 +922,7 @@ function registerEventHandlers() {
 
     document.onmousedown = function(event) {
         if(!event) event = window.event;
+        if(recentTouchEvent()) { preventDefault(event); return; }
         updateMousePos(event);
         var button = event.button | 0;
         if(button >= 0 && button <= 2) {
@@ -410,6 +939,7 @@ function registerEventHandlers() {
 
     document.onmouseup = function(event) {
         if(!event) event = window.event;
+        if(recentTouchEvent()) { preventDefault(event); return; }
         updateMousePos(event);
         var button = event.button | 0;
         if(button >= 0 && button <= 2) {
@@ -423,6 +953,7 @@ function registerEventHandlers() {
 
     document.ondblclick = function(event) {
         if(!event) event = window.event;
+        if(recentTouchEvent()) { preventDefault(event); return; }
         updateMousePos(event);
         putEvent("MDBL_" + mouseX + "_" + mouseY);
         preventDefault(event);
@@ -430,6 +961,7 @@ function registerEventHandlers() {
 
     document.onmousemove = function(event) {
         if(!event) event = window.event;
+        if(recentTouchEvent()) return;
         updateMousePos(event);
         if(!mouseMoved) {
             mouseMoved = true;
@@ -441,6 +973,7 @@ function registerEventHandlers() {
         document.addEventListener(
             "DOMMouseScroll",
             function(event) {
+                if(recentTouchEvent()) { event.preventDefault(); return; }
                 var delta = -120 * (event.detail | 0);
                 putEvent("MWH_" + mouseX + "_" + mouseY + "_" + delta);
                 event.preventDefault();
@@ -450,10 +983,12 @@ function registerEventHandlers() {
     } else if(useOnMouseWheel) {
         document.onmousewheel = function(event) {
             if(!event) event = window.event;
+            if(recentTouchEvent()) return;
             putEvent("MWH_" + mouseX + "_" + mouseY + "_" + (event.wheelDelta | 0));
         };
     } else {
         document.onwheel = function(event) {
+            if(recentTouchEvent()) return;
             var delta = 0;
             if(event.deltaY > 0) delta = -120;
             if(event.deltaY < 0) delta = 120;
@@ -462,6 +997,7 @@ function registerEventHandlers() {
     }
 
     document.body.onmouseleave = function() {
+        if(recentTouchEvent()) return;
         putEvent("MOUT_" + mouseX + "_" + mouseY);
     };
 
@@ -493,7 +1029,18 @@ function registerEventHandlers() {
         preventDefault(event);
     };
 
+    if(isTouchDevice) {
+        // Notify the server that this client uses touch input, so that it can
+        // enlarge the control bar for touch operation. This event is sent as
+        // part of the first image request, before any other events.
+        putEvent("TCH_1");
+
+        registerKeyboardHandlers();
+        registerTouchHandlers();
+    }
+
     document.onkeypress = function(event) {
+        if(keyboardHasFocus()) return; // handled by the virtual keyboard element
         if(!event) {
             event = window.event;
             var key = event.keyCode | 0;
@@ -512,6 +1059,7 @@ function registerEventHandlers() {
     };
 
     document.onkeydown = function(event) {
+        if(keyboardHasFocus()) return; // handled by the virtual keyboard element
         if(!event) {
             event = window.event;
             var key = event.keyCode | 0;
@@ -535,6 +1083,7 @@ function registerEventHandlers() {
     };
 
     document.onkeyup = function(event) {
+        if(keyboardHasFocus()) return; // handled by the virtual keyboard element
         if(!event) {
             event = window.event;
             var key = event.keyCode | 0;
@@ -588,6 +1137,7 @@ window.onload = function() {
 <form></form>
 <form></form>
 <form></form>
+<textarea id="kbTextarea"></textarea><input id="kbInput" type="text">
 <form><input></form>
 </body>
 </html>

@@ -95,6 +95,9 @@ function upload() {
 <li>Clicking text while holding Shift should move one end of the selection range
 </ul>
 <li>Click on the Address text field, and test that all the operations in the previous phase work in it as well, except for the ones requiring multiline text (that is, line breaks, Up/Down arrow keys and PageUp/PageDown keys). Additionally, check that Ctrl+A or Ctrl+Shift+A selects all the text.
+<li>(Touch screen clients only) Tap the box above with one finger. The word "Left" should appear while the finger is pressed down and disappear when it is lifted (no native browser context menu or page zooming should occur). Swipe up and down with one finger inside the browser viewport; the page should scroll smoothly, including fling scrolling when swiping fast. Pinch with two fingers to check that multi-touch events are relayed.
+<li>(Touch screen clients only) Tap the textarea below. The on-screen keyboard of the client device should open (possibly after a short delay). Type some text using the on-screen keyboard; it should appear in the remote textarea, including corrections made by autocorrect and characters entered via input method editors. Press Backspace/Delete key on the on-screen keyboard to delete characters. Tap outside the textarea (e.g. on an empty part of the page); the on-screen keyboard should close. Tap back into the textarea; the keyboard should open again.
+<li>(Touch screen clients only) Tap a text field that requests numeric input (such as &lt;input type="number"&gt; or a phone number field). The on-screen keyboard should show a numeric key layout.
 <li>Select the below text, copy it with Ctrl+C, click the textarea below it and paste the text with Ctrl+V. The text should appear in the text field.<br>
 COPY THIS TEXT<br>
 INCLUDING THIS LINE<br>

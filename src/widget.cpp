@@ -68,8 +68,20 @@ void Widget::takeFocus() {
     widgetGainFocusEvent_(viewport_.width() / 2, viewport_.height() / 2);
 }
 
+Widget* Widget::focusedLeaf() {
+    if(focusChild_) {
+        return focusChild_->focusedLeaf();
+    } else if(focused_) {
+        return this;
+    } else {
+        return nullptr;
+    }
+}
+
 void Widget::sendMouseDownEvent(int x, int y, int button) {
     REQUIRE_UI_THREAD();
+
+    mapEventCoords_(x, y);
 
     lastMouseX_ = x;
     lastMouseY_ = y;
@@ -87,6 +99,8 @@ void Widget::sendMouseDownEvent(int x, int y, int button) {
 void Widget::sendMouseUpEvent(int x, int y, int button) {
     REQUIRE_UI_THREAD();
 
+    mapEventCoords_(x, y);
+
     lastMouseX_ = x;
     lastMouseY_ = y;
 
@@ -103,6 +117,8 @@ void Widget::sendMouseUpEvent(int x, int y, int button) {
 void Widget::sendMouseDoubleClickEvent(int x, int y) {
     REQUIRE_UI_THREAD();
 
+    mapEventCoords_(x, y);
+
     lastMouseX_ = x;
     lastMouseY_ = y;
 
@@ -111,6 +127,8 @@ void Widget::sendMouseDoubleClickEvent(int x, int y) {
 
 void Widget::sendMouseWheelEvent(int x, int y, int delta) {
     REQUIRE_UI_THREAD();
+
+    mapEventCoords_(x, y);
 
     lastMouseX_ = x;
     lastMouseY_ = y;
@@ -121,6 +139,8 @@ void Widget::sendMouseWheelEvent(int x, int y, int delta) {
 
 void Widget::sendMouseMoveEvent(int x, int y) {
     REQUIRE_UI_THREAD();
+
+    mapEventCoords_(x, y);
 
     if(!mouseOver_ && x == lastMouseX_ && y == lastMouseY_) {
         return;
@@ -136,6 +156,8 @@ void Widget::sendMouseMoveEvent(int x, int y) {
 void Widget::sendMouseEnterEvent(int x, int y) {
     REQUIRE_UI_THREAD();
 
+    mapEventCoords_(x, y);
+
     lastMouseX_ = x;
     lastMouseY_ = y;
 
@@ -144,6 +166,8 @@ void Widget::sendMouseEnterEvent(int x, int y) {
 
 void Widget::sendMouseLeaveEvent(int x, int y) {
     REQUIRE_UI_THREAD();
+
+    mapEventCoords_(x, y);
 
     lastMouseX_ = x;
     lastMouseY_ = y;
@@ -229,6 +253,81 @@ void Widget::sendLoseFocusEvent() {
         focusChild_.reset();
         focused_ = false;
     }
+}
+
+void Widget::sendTouchBeginEvent(int x, int y, int id) {
+    REQUIRE_UI_THREAD();
+
+    mapEventCoords_(x, y);
+
+    lastMouseX_ = x;
+    lastMouseY_ = y;
+
+    if(touchesDown_.count(id)) {
+        return;
+    }
+
+    updateFocus_(x, y);
+
+    shared_ptr<Widget> child = focusChild_;
+    touchesDown_[id] = child;
+
+    if(child) {
+        child->sendTouchBeginEvent(x, y, id);
+    } else {
+        x -= viewport_.globalX();
+        y -= viewport_.globalY();
+        widgetTouchBeginEvent_(x, y, id);
+    }
+}
+
+void Widget::sendTouchUpdateEvent(int x, int y, int id) {
+    REQUIRE_UI_THREAD();
+
+    mapEventCoords_(x, y);
+
+    auto it = touchesDown_.find(id);
+    if(it == touchesDown_.end()) {
+        return;
+    }
+
+    lastMouseX_ = x;
+    lastMouseY_ = y;
+
+    shared_ptr<Widget> child = it->second;
+    if(child) {
+        child->sendTouchUpdateEvent(x, y, id);
+    } else {
+        x -= viewport_.globalX();
+        y -= viewport_.globalY();
+        widgetTouchUpdateEvent_(x, y, id);
+    }
+}
+
+void Widget::sendTouchEndEvent(int x, int y, int id, bool cancelled) {
+    REQUIRE_UI_THREAD();
+
+    mapEventCoords_(x, y);
+
+    auto it = touchesDown_.find(id);
+    if(it == touchesDown_.end()) {
+        return;
+    }
+    shared_ptr<Widget> child = it->second;
+    touchesDown_.erase(it);
+
+    lastMouseX_ = x;
+    lastMouseY_ = y;
+
+    if(child) {
+        child->sendTouchEndEvent(x, y, id, cancelled);
+    } else {
+        x -= viewport_.globalX();
+        y -= viewport_.globalY();
+        widgetTouchEndEvent_(x, y, id, cancelled);
+    }
+
+    updateMouseOver_(x, y);
 }
 
 void Widget::onWidgetViewDirty() {
@@ -352,6 +451,17 @@ void Widget::clearEventState_(int x, int y) {
         int key = *keysDown_.begin();
         keysDown_.erase(keysDown_.begin());
         forwardKeyUpEvent_(key);
+    }
+
+    while(!touchesDown_.empty()) {
+        int id = touchesDown_.begin()->first;
+        shared_ptr<Widget> child = touchesDown_.begin()->second;
+        touchesDown_.erase(touchesDown_.begin());
+        if(child) {
+            child->sendTouchEndEvent(x, y, id, true);
+        } else {
+            widgetTouchEndEvent_(x - viewport_.globalX(), y - viewport_.globalY(), id, true);
+        }
     }
 }
 

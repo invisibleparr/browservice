@@ -1,5 +1,93 @@
 # Browservice: Browser as a Service
 
+## clankware
+
+This code has been written by qwen3.8-flash-next and i did only the commanding
+and testing. It does not have feature parity with the desktop as my only goal
+was to be able to repurpose old Tablets in a Kiosk-y Mode, so clipboard and
+file downloads and uploads might not work because i simply did not test them.
+
+However you do get virtual keyboards and native touch input translation.
+Keyboard has some quirks tho because mobile:
+On iOS you need to tap the input box twice.
+On Android you can only delete up to ~512 characters you did not type. If that
+is not enough you need to unfocus and refocus the the input box.
+
+Could those issues be fixed? Maybe. Not my usecase because for general browsing
+it is not fun anyway.
+Also as the op-dev said this is unmaintained, so maybe use this only in trusted
+places and websites, or update it if you want to.
+
+
+Tested on the following devices:
+
+* iPad 3rd generation, iOS 9.3.6 (Safari)
+* Samsung Galaxy Tab 2, Android 7.1.2, Lightning Browser 5.1.0
+* iPod touch 2nd generation, iOS 4.2.1 (app browser shell with old WebKit)
+* - i did that one only for the lulz and it can barely work.
+
+## Touch Input and Virtual Keyboard (this fork)
+
+This fork adds first-class support for touch clients (phones and tablets):
+
+* **Touch input.** Raw multi-touch events are captured on the client and sent to
+  the server (`TDN`/`TMO`/`TUP`/`TCA` tokens, which ride along in the URL of the
+  image polling requests). The server feeds them into CEF's gesture provider, so
+  taps become clicks, and swipes/pinches become native scrolls and zooms inside
+  the remote browser. Touch clients announce themselves with a one-time `TCH`
+  token; non-touch clients behave exactly as before.
+* **Virtual keyboard.** When a text field gains focus on the server side (either
+  in a remote page or in the control bar address field), an input-mode signal is
+  encoded in the image height (`floor((height % 9) / 3)`: none/text/numeric). The
+  client then focuses a hidden textarea/input element, which brings up the
+  device's on-screen keyboard. Typed characters and deletions are diffed against
+  a local buffer and sent as key events.
+* **Touch control bar.** For touch clients the control bar is rendered twice as
+  tall (contents drawn at normal size into an internal buffer and smoothly
+  upscaled; incoming event coordinates are mapped back), making the buttons much
+  easier to hit on a phone screen.
+
+### Mobile platform quirks worth knowing about
+
+* **Android keyboards report no usable key codes.** Gboard reports `keyCode 229`
+  / `key: "Unidentified"` for every soft-key press, so a backspace pressed while
+  the local keyboard buffer is empty produces no detectable event at all. Since
+  the server cannot read the remote field's existing content, deleting it would
+  be impossible. As a workaround, once such a browser is detected the client
+  seeds its hidden input with filler characters (auto-refilled on demand), so
+  every backspace press deletes something locally and thereby produces a regular
+  diff that maps to exactly one remote backspace. Browsers with proper key codes
+  (iOS) keep an empty buffer and detect backspaces directly instead, preserving
+  native text input behavior there.
+* **iOS only shows the on-screen keyboard from within a user gesture.** The
+  "text field focused" signal arrives via an image update after the tap has
+  already ended, so the first tap on a text field only focuses it remotely; a
+  second tap anywhere opens the keyboard. (A speculative one-tap scheme based on
+  the streamed cursor shape was tried and rejected: too many false positives.)
+* **iOS Safari bfcache.** The bootstrap redirect dance (`pre_main` → `/next/` →
+  `history.back()`) can leave iOS Safari stranded on a blank page restored from
+  the back/forward cache; all intermediate pages therefore carry
+  `pageshow(persisted)` handlers that navigate onward.
+* **iOS Chrome coalesces history entries.** It merges the rapid bootstrap
+  navigations into one entry, which makes `history.back()` overshoot to the
+  previously visited site; on `CriOS` the dance is skipped entirely and the main
+  page is loaded directly.
+* **Touch identifiers.** iOS Safari uses arbitrary large integers as touch
+  identifiers while the vice protocol requires ids in range 0..15 (Android
+  Chrome happens to use small ones); the client maps live identifiers to slots
+  for the duration of each touch.
+* **Old iOS WebKit needs a direct tap for the keyboard.** WebKit builds older
+  than version 600 (iOS 4 era) never show the on-screen keyboard in response to
+  programmatic `focus()` calls, not even from within a user gesture handler;
+  the keyboard only appears when a tap lands directly on an editable element.
+  On such clients (detected via the UA string), while a remote field has focus,
+  the hidden input element is stretched transparently over the whole viewport
+  so that the next tap physically hits it and brings up the keyboard natively;
+  the events still bubble through to the normal handlers with correct
+  coordinates, so input keeps flowing to the remote page.
+
+---
+
 ## ⚠️ UNMAINTAINED (2026-09-11)
 
 **Browservice is no longer maintained.** I, [@ttalvitie](https://github.com/ttalvitie/), will not be making new releases, providing updated binaries, fixing bugs, answering issues or reviewing pull requests.
@@ -69,6 +157,7 @@ Initially, this approach of sending the whole browser view as a new image every 
 The current features of Browservice include the following:
 
 - Viewing of and keyboard/mouse interaction with all the web pages supported by the Chromium browser; this includes web apps such as YouTube, ~Gmail~, GitHub, Office on the web, Twitter, Facebook and Instagram (logging in Gmail and other Google services may be difficult due to new embedded browser login restrictions)
+- Touch screen support for modern touch device clients: raw multi-touch events are relayed to the remote browser engine (enabling tap-to-click, swipe/fling scrolling and other native gestures), and an on-screen keyboard is opened automatically on the client when a text field in a web page gains focus (with key layout selection based on the focused field type)
 - Support for multiple concurrent browser windows
 - Text clipboard common to all browser windows (accessed through Ctrl+C and Ctrl+V)
 - Form for accessing the browser clipboard from the client side

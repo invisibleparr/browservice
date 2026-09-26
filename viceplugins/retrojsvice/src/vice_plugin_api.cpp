@@ -386,7 +386,12 @@ API_FUNC_START
     REQUIRE(apiVersion == (uint64_t)2000000);
 
     string nameStr = name;
-    if(nameStr == "URINavigation" || nameStr == "PluginNavigationControlSupportQuery") {
+    if(
+        nameStr == "URINavigation" ||
+        nameStr == "PluginNavigationControlSupportQuery" ||
+        nameStr == "TouchInput" ||
+        nameStr == "VirtualKeyboard"
+    ) {
         return 1;
     } else {
         return 0;
@@ -405,5 +410,18 @@ API_EXPORT int vicePluginAPI_PluginNavigationControlSupportQuery_query(
     VicePluginAPI_Context* ctx
 )
 WRAP_CTX_API(PluginNavigationControlSupportQuery_query);
+
+API_EXPORT void vicePluginAPI_TouchInput_enable(
+    VicePluginAPI_Context* ctx,
+    VicePluginAPI_TouchInput_Callbacks callbacks
+)
+WRAP_CTX_API(TouchInput_enable, callbacks);
+
+API_EXPORT void vicePluginAPI_VirtualKeyboard_setWindowTextInputMode(
+    VicePluginAPI_Context* ctx,
+    uint64_t window,
+    VicePluginAPI_TextInputMode mode
+)
+WRAP_CTX_API(VirtualKeyboard_setWindowTextInputMode, window, mode);
 
 }

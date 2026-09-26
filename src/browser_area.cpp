@@ -3,6 +3,7 @@
 #include "key.hpp"
 #include "text.hpp"
 
+#include "include/cef_browser.h"
 #include "include/cef_render_handler.h"
 
 namespace browservice {
@@ -14,6 +15,23 @@ CefMouseEvent createMouseEvent(int x, int y, uint32_t eventModifiers) {
     event.x = x;
     event.y = y;
     event.modifiers = eventModifiers;
+    return event;
+}
+
+CefTouchEvent createTouchEvent(
+    int id, int x, int y, cef_touch_event_type_t type, uint32_t eventModifiers
+) {
+    CefTouchEvent event;
+    event.id = id;
+    event.x = (float)x;
+    event.y = (float)y;
+    event.radius_x = 1.0f;
+    event.radius_y = 1.0f;
+    event.rotation_angle = 0.0f;
+    event.pressure = 1.0f;
+    event.type = type;
+    event.modifiers = eventModifiers;
+    event.pointer_type = CEF_POINTER_TYPE_TOUCH;
     return event;
 }
 
@@ -238,6 +256,18 @@ public:
         }
     }
 
+    virtual void OnVirtualKeyboardRequested(
+        CefRefPtr<CefBrowser>, TextInputMode input_mode
+    ) override {
+        REQUIRE_UI_THREAD();
+
+        postTask(
+            browserArea_->eventHandler_,
+            &BrowserAreaEventHandler::onBrowserAreaTextInputModeChanged,
+            (int)input_mode
+        );
+    }
+
 private:
     shared_ptr<BrowserArea> browserArea_;
 
@@ -460,6 +490,36 @@ void BrowserArea::widgetLoseFocusEvent_() {
     if(!browser_) return;
 
     browser_->GetHost()->SetFocus(false);
+}
+
+void BrowserArea::widgetTouchBeginEvent_(int x, int y, int id) {
+    REQUIRE_UI_THREAD();
+    if(!browser_) return;
+
+    browser_->GetHost()->SendTouchEvent(
+        createTouchEvent(id, x, y, CEF_TET_PRESSED, eventModifiers_)
+    );
+}
+
+void BrowserArea::widgetTouchUpdateEvent_(int x, int y, int id) {
+    REQUIRE_UI_THREAD();
+    if(!browser_) return;
+
+    browser_->GetHost()->SendTouchEvent(
+        createTouchEvent(id, x, y, CEF_TET_MOVED, eventModifiers_)
+    );
+}
+
+void BrowserArea::widgetTouchEndEvent_(int x, int y, int id, bool cancelled) {
+    REQUIRE_UI_THREAD();
+    if(!browser_) return;
+
+    browser_->GetHost()->SendTouchEvent(
+        createTouchEvent(
+            id, x, y, cancelled ? CEF_TET_CANCELLED : CEF_TET_RELEASED,
+            eventModifiers_
+        )
+    );
 }
 
 }
